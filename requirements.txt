@@ -1,0 +1,12 @@
+sounddevice == 0.5.1
+pvporcupine == 3.0.3
+pvrecorder == 1.2.4
+pvcobra == 2.0.3
+numpy == 1.26.3
+soundfile == 0.12.1
+transformers == 4.47.0
+openai-whisper == 20240930
+requests == 2.32.3
+torch == 2.5.1+cu124 
+torchaudio == 2.5.1+cu124
+keyboard == 0.13.5
