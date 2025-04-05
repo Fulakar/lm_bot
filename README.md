@@ -1,5 +1,5 @@
 # Аргументы для запуска
- - --stt_model' размер модели whisper, по умолчанию 'small'
+ - --whisper_size' размер модели whisper, по умолчанию 'small'
  - --tts_model', модель с hf для генерации ауидо, по умолчанию 'utrobinmv/tts_ru_free_hf_vits_high_multispeaker'
  - --picovoice_key', ключ [picovoice](console.picovoice.ai)
  - --keyword', ключевое слово для начала работы с ботом, по умолчанию 'bumblebee' (Полный список в pvporcupine.KEYWORDS)

@@ -10,30 +10,30 @@ import requests
 import json
 import torch
 import argparse
-import keyboard
 import json
 from pvrecorder import PvRecorder
+
+import keyboard
+from duckduckgo_search import DDGS
+from call_func import os_music, duckduck_search
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Аргументы
+# Парсинг аргументов
 arg_parser = argparse.ArgumentParser(description = "Process some parameters.")
-arg_parser.add_argument('--stt_model', default = 'small')
+arg_parser.add_argument('--whisper_size', default = 'small')
 arg_parser.add_argument('--tts_model', default = 'utrobinmv/tts_ru_free_hf_vits_high_multispeaker')
 arg_parser.add_argument('--picovoice_key', default = 'kszOncmfUz7CnIwqlzn/PcoRmhBSovtJtm/u7OaUyu9OO6784lM/9Q==')
 arg_parser.add_argument('--keyword', default = 'bumblebee')
 arg_parser.add_argument('--port', default='1234')
-arg_parser.add_argument('--llm', default='llama-3.2-3b-instruct')
+arg_parser.add_argument('--llm_name', default='llama-3.2-3b-instruct')
 args = arg_parser.parse_args()
-
-
-
 
 # HOTWORD, VOICE DETECT
 porcupine = pvporcupine.create(access_key = args.picovoice_key, keywords=[args.keyword])
 recoder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
 cobra = pvcobra.create(access_key = args.picovoice_key)
 # STT WHISPER
-model_stt = whisper.load_model(args.stt_model, device=device)
+model_stt = whisper.load_model(args.whisper_size, device=device)
 # TTS MODEL
 model_tts = VitsModel.from_pretrained(args.tts_model)
 tokenizer_tts = AutoTokenizer.from_pretrained(args.tts_model)
@@ -55,11 +55,16 @@ def get_default_audio_device():
     return next((i for i, d in enumerate(devices) if i == default_device), None)
 
 def get_next_audio_frame(DURATION):
+    """audioframe с микрофона"""
     audio_frame = sd.rec(int(SAMPLE_RATE * DURATION), samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='int16')
     sd.wait()
     return audio_frame
 
 def detect_phrase():
+    """Детекция горячего слова. Определяется в --keyword.
+    ['alexa','americano','blueberry','bumblebee','computer','grapefruit','grasshopper','hey barista','hey google',
+    'hey siri','jarvis','ok google','pico clock','picovoice','porcupine','terminator']
+    """
     try:
         recoder.start()
         while True:
@@ -94,15 +99,28 @@ def TTS(text, device_audio):
     sd.wait()
 
 def text_for_llm(req):
-        instruct = """Ты голосовой ассистент вызывающий функции в python.
-        Возвращай ответ в виде: os_music(code). Варианты для code: 1 - предыдущий трек, 2 - следующий трек, 3 - пауза или включение музыки, 4 - повышение громокости, 5 - понижение громкости.
-        Пример:
-        Запрос: сделай музыку тише
-        Ответ: {"func":"os_music", "code":5}
-        Запрос: поставь музыку на паузу
-        Ответ: {"func":"os_music", "code":3}"""
-
-        text = {'model':args.llm, 
+        instruct = """
+            Ты - голосовой ассистент, который управляет функциями через JSON-ответы.
+            Действуй по схеме: распознай команду -> найди соответствующую функцию -> верни код.
+            Доступные функции:
+            1. os_music (управление музыкой):
+                - code 1 = предыдущий трек
+                - code 2 = следующий трек
+                - code 3 = пауза/возобновление
+                - code 4 = увеличить громкость
+                - code 5 = уменьшить громкость
+            2. duckduck_search (запрос в поисковик):
+                - text = запрос пользователя
+            Правила:
+            - Отвечай только в формате JSON: {"func": "название", "args":{"аргумент": "значение"}}
+            Примеры:
+            Запрос: сделай музыку тише -> {"func":"os_music", "args":{"code":5}}
+            Запрос: поставь музыку на паузу -> {"func":"os_music", "args":{"code":3}}
+            Запрос: посмотри кто такой пушкин -> {"func":"duckduck_search", "args":{"text":"Кто такой пушкин?"}}
+            Запрос: поищи что такое интеграл -> {"func":"duckduck_search", "args":{"text":"Что такое интеграл?"}}
+            Запрос: найди мне кто был президентом в России в 2007 -> {"func":"duckduck_search", "args":{"text":"Кто был президентом России в 2007 году?"}}
+            """
+        text = {'model':args.llm_name, 
         'messages':[
             {'role':'system', 'content':instruct},
             {'role':'user', 'content':f'{req}'}
@@ -113,14 +131,6 @@ def text_for_llm(req):
         resp = requests.post(url, json=text)
         resp = json.loads(resp.text)['choices'][0]['message']['content']
         return resp
-
-def os_music(code):
-    cmd = {1:"previous track",
-       2:"next track", 
-       3:"play/pause", 
-       4:"volume up", 
-       5:"volume down"}
-    keyboard.send(cmd[code])
 
 device_audio = get_default_audio_device()
 TTS('     Готов     ', device_audio)
@@ -148,7 +158,7 @@ while True:
         try:
             llm_resp = json.loads(llm_resp)
             print(f'ASSISTENT: {llm_resp}')
-            globals()[llm_resp['func']](llm_resp['code'])
+            globals()[llm_resp['func']](**llm_resp['args'])
         except:
             print(f'ASSISTENT: {llm_resp}') #log
             # Озвучивание ответа llm
