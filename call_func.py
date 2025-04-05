@@ -1,5 +1,12 @@
 import keyboard
 from duckduckgo_search import DDGS
+import json
+# UTILS
+import requests
+from utils import llm_request
+
+from colorama import Fore, init as colorama_init
+colorama_init()
 
 # Вызывает модель
 def os_music(code):
@@ -10,21 +17,24 @@ def os_music(code):
        5:"volume down"}
     keyboard.send(cmd[code])
 
-def duckduck_search(user_request):
-    results = DDGS().text(user_request, max_results=5)
-    results = " | ".join([row["body"] for row in results])
+def duckduck_search(text, llm_name, llm_api_url, max_results:int=5):
+    results_from_engine = DDGS().text(text, max_results=max_results)
+    results_from_engine = " | ".join([row["body"] for row in results_from_engine])
 
-    instruct = "Ты специалист по суммаризации текстов. Пользователь тебе дает текст, ты выдаешь его суммаризацию."
+    instruct = """
+    Ты специалист по суммаризации текстов. 
+    Пользователь тебе дает текст, ты выдаешь его суммаризацию текста на основе запроса пользователя.
+    """
+    request = f'Запрос пользователя: {text}. Текст для суммаризации: {results_from_engine}'
 
-    text = {'model':args.llm, 
-        'messages':[
-            {'role':'system', 'content':instruct},
-            {'role':'user', 'content':f'Запрос пользователя: {user_request}. Текст для суммаризации: {results}'}
-            ],
-        "temperature": 0.1, 
-        "max_tokens": -1,
-        "stream": False}
-    resp = requests.post(url, json=text)
-    resp = json.loads(resp.text)['choices'][0]['message']['content']
+    resp = llm_request(request, instruct, llm_name, llm_api_url)
     return resp
-    return results
+
+def call_func_with_llm_resp(llm_resp, llm_name, llm_api_url):
+    llm_resp = llm_resp.replace(" ", "").strip("`")
+    llm_resp = json.loads(llm_resp)
+    print(Fore.BLUE + f'AGENT FUNCTION CALLABLE: {llm_resp}')
+    if llm_resp["func"] == "duckduck_search":
+        llm_resp["args"]["llm_name"] = llm_name
+        llm_resp["args"]["llm_api_url"] = llm_api_url
+    return globals()[llm_resp["func"]](**llm_resp["args"])
