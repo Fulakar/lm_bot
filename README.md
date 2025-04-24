@@ -20,7 +20,7 @@ app.py - главный файл
 ---
 Функции агента:
 - os_music - управление музыкой <br>
-- duckduck_search - поисковик <br>
+- duckduck_search - поисковик (пока берет описание первых 5 ссылок) <br>
 - send_message - отправка сообщение пользователю (telegram)(**работает только для диалогов из ALLOWED_DIALOG**) <br>
 - get_unread_dialogs - наличие непрочитанных сообщений (telegram)(**работает только для диалогов из ALLOWED_DIALOG**) <br>
 

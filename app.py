@@ -16,7 +16,8 @@ HOST = os.getenv("HOST")
 LLM_NAME = os.getenv("LLM_NAME")
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-ALLOWED_DIALOG = ["Некет", "Stanislav", "Милена"]
+ALLOWED_DIALOG = os.getenv("ALLOWED_DIALOG")
+ALLOWED_DIALOG = [name.strip() for name in ALLOWED_DIALOG.split(";")]
 
 LLM_API_URL = f'http://{HOST}:{PORT}/v1'
 
