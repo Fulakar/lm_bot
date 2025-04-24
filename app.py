@@ -1,32 +1,34 @@
 import fulakar_agent
-import call_func
-import argparse
+from dotenv import load_dotenv
+import os
 from colorama import Fore, init as colorama_init
 colorama_init()
-
+from call_func import TOOLS
 
 # Парсинг аргументов
-arg_parser = argparse.ArgumentParser(description = "Process some parameters.")
-arg_parser.add_argument('--whisper_size', default = 'small')
-arg_parser.add_argument('--tts_model', default = 'utrobinmv/tts_ru_free_hf_vits_high_multispeaker')
-arg_parser.add_argument('--picovoice_key', default = 'kszOncmfUz7CnIwqlzn/PcoRmhBSovtJtm/u7OaUyu9OO6784lM/9Q==')
-arg_parser.add_argument('--keyword', default = 'bumblebee')
-arg_parser.add_argument('--port', default='1234')
-arg_parser.add_argument('--host', default='localhost')
-arg_parser.add_argument('--llm_name', default='llama-3.2-3b-instruct')
-args = arg_parser.parse_args()
+load_dotenv()
+WHISPER_SIZE = os.getenv("WHISPER_SIZE")
+TTS_MODEL = os.getenv("TTS_MODEL")
+PICOVOICE_KEY = os.getenv("PICOVOICE_KEY")
+KEYWORD = os.getenv("KEYWORD")
+PORT = os.getenv("PORT")
+HOST = os.getenv("HOST")
+LLM_NAME = os.getenv("LLM_NAME")
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+ALLOWED_DIALOG = ["Некет", "Stanislav", "Милена"]
 
-url = f'http://{args.host}:{args.port}/v1/chat/completions'
+LLM_API_URL = f'http://{HOST}:{PORT}/v1'
 
 SAMPLE_RATE = 512 * 32
 CHANNELS = 1 
 DURATION_FRAME_HOTWORD = 0.5
 DURATION_FRAME_VOID = 1
 
-agent = fulakar_agent.Agent(args.picovoice_key, args.keyword, 
-                            args.whisper_size, 
-                            args.tts_model, 
-                            args.llm_name, llm_api_url=url,
+agent = fulakar_agent.Agent(PICOVOICE_KEY, KEYWORD, 
+                            WHISPER_SIZE, 
+                            TTS_MODEL, 
+                            LLM_NAME, llm_api_url=LLM_API_URL, tools=TOOLS,
                             SAMPLE_RATE=SAMPLE_RATE, CHANNELS=CHANNELS, DURATION_FRAME_HOTWORD=DURATION_FRAME_HOTWORD, DURATION_FRAME_VOID=DURATION_FRAME_VOID)
 
 print(Fore.RED + 'Агент создан')

@@ -1,34 +1,29 @@
+from langchain.agents import AgentType, Tool, load_tools, initialize_agent
+from langchain.prompts import PromptTemplate
+from langchain.llms import OpenAI
+
 import sounddevice as sd
 import pvporcupine
 import pvcobra
 import numpy as np
-import soundfile as sf
-from torchaudio import load as torch_load
 from transformers import VitsModel, AutoTokenizer
-import whisper
+from faster_whisper import WhisperModel
 import torch
 from pvrecorder import PvRecorder
 from typing import List
 from colorama import Fore, init as colorama_init
 colorama_init()
-# CALL FUNC
-import keyboard
-from duckduckgo_search import DDGS
-import json
-from call_func import os_music, duckduck_search, call_func_with_llm_resp
-# UTILS
-import requests
-from utils import llm_request
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class Agent():
     def __init__(self, picovoice_key:str, keyword:List[str], whisper_size:str, tts_model:str,
-                 llm_name, llm_api_url,
+                 llm_name, llm_api_url, tools:List[Tool],
                 SAMPLE_RATE = 512 * 32,
                 CHANNELS = 1,
                 DURATION_FRAME_HOTWORD = 0.5,
                 DURATION_FRAME_VOID = 1):
+        self.TOOLS = tools
         self.SAMPLE_RATE = SAMPLE_RATE
         self.CHANNELS = CHANNELS
         self.DURATION_FRAME_HOTWORD = DURATION_FRAME_HOTWORD
@@ -40,13 +35,16 @@ class Agent():
         self.recoder = PvRecorder(device_index=-1, frame_length=self.porcupine.frame_length)
         self.cobra = pvcobra.create(access_key=picovoice_key)
         # STT WHISPER
-        self.model_stt = whisper.load_model(whisper_size, device=device)
+        self.model_stt = WhisperModel(whisper_size, 
+                                      device=device, 
+                                      compute_type="int8_float16" if device == "cuda" else "float32")
         # TTS MODEL
         self.model_tts = VitsModel.from_pretrained(tts_model).to(device).eval()
         self.tokenizer_tts = AutoTokenizer.from_pretrained(tts_model)
         # DEFAULT AUDIO DEVICE
         self.device_audio = self.get_default_audio_device()
-
+        # AGENT
+        self.agent = self.get_agent()
     def get_default_audio_device(self):
         """Возвращает индекс устройства вывода по умолчанию."""
         default_device = sd.default.device['output']
@@ -79,15 +77,15 @@ class Agent():
             if self.cobra.process(audio_frame[sample]) > 0.95:
                 return True
             
-    def STT(self, audio):
-        audio = whisper.pad_or_trim(audio)
-        mel = whisper.log_mel_spectrogram(audio).type(torch.float16).to(self.model_stt.device)
-        options = whisper.DecodingOptions(language='ru')
-        result = whisper.decode(self.model_stt, mel, options)
-        result_text = result[0].text
-        return result_text
+    def STT(self, audio:np.array):
+        audio = audio / 2 ** 15
+        segments, _ = self.model_stt.transcribe(audio, language="ru")
+        text = ""
+        for segment in segments:
+            text += segment.text
+        return text
 
-    def TTS(self, text):
+    def TTS(self, text:str):
         text = text.lower()
         inputs = self.tokenizer_tts(text, return_tensors="pt")
         speaker = 1 # 0-woman, 1-man 
@@ -97,54 +95,42 @@ class Agent():
         sd.play(output.reshape(-1), samplerate=self.model_tts.config.sampling_rate, device=self.device_audio)
         sd.wait()
 
-    def text_for_llm(self, user_request):
-        instruct = """
-Ты - голосовой ассистент. Возвращай ответы ТОЛЬКО в формате JSON.
-
-
-Доступные функции:
-1. os_music (управление музыкой)
-Аргументы:
-- code (число): 
-    1 = предыдущий трек
-    2 = следующий трек
-    3 = пауза/воспроизведение
-    4 = прибавить громкость
-    5 = убавить громкость
-
-2. duckduck_search (поиск в интернете)
-   Аргументы:
-   - text (строка): запрос пользователя    
-
-   
-Формат ответа:
-{"func": "название функции","args": {"аргумент": значение}}
-
-
-Примеры:
-Запрос пользователя: сделай музыку тише
-Твой ответ: {"func":"os_music", "args":{"code":5}}
-
-Запрос пользователя: поставь музыку на паузу
-Твой ответ: {"func":"os_music", "args":{"code":3}}
-
-Запрос пользователя: посмотри кто такой пушкин
-Твой ответ: {"func":"duckduck_search", "args":{"text":"Кто такой пушкин?"}}
-
-Запрос пользователя: поищи что такое интеграл
-Твой ответ: {"func":"duckduck_search", "args":{"text":"Что такое интеграл?"}}
-
-Запрос пользователя: найди мне кто был президентом в России в 2007
-Твой ответ: {"func":"duckduck_search", "args":{"text":"Кто был президентом России в 2007 году?"}}
-"""
-        resp = llm_request(user_request, instruct, self.llm_name, self.llm_api_url)
-        return resp
+    def get_agent(self):
+        # LLM
+        self.llm = OpenAI(
+            model_name=self.llm_name,
+            openai_api_base=self.llm_api_url,
+            temperature=0.5,
+            max_tokens=1000,
+            model_kwargs={"model": self.llm_name},
+            openai_api_key="any_key"
+        )
+        self.system_prompt = PromptTemplate.from_template(
+            template="""
+        Ты ассистент, отвечающий только на текущий запрос пользователя. Игнорируй любые предыдущие вопросы, сообщения или контекст, если они не указаны явно. 
+        Отвечай строго на русском языке.
+        """
+        )
+        # TOOLS
+        llm_math = load_tools(["llm-math"], self.llm)[0]
+        llm_math.description = "Полезно, когда вам нужно ответить на вопросы по математике"
+        llm_math.name = "Калькулятор"
+        self.TOOLS.append(llm_math)
+        # AGENT
+        agent = initialize_agent(
+            tools=self.TOOLS, 
+            llm=self.llm, 
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, 
+            verbose=True,
+            system_prompt=self.system_prompt
+        )
+        return agent
 
     def start(self):
         while True:
             # Детекция ключевого слова
             if self.detect_phrase():
-                print(Fore.BLUE + 'Слушаю') #log
+                print(Fore.BLUE + 'Слушаю')
                 detect_speech_ = True 
                 VAW = np.array([])
                 # Запись фразы до момента тишины, запись в вафку
@@ -153,18 +139,10 @@ class Agent():
                     detect_speech_ = self.detect_speech(audio_frame)
                     VAW = np.append(VAW, audio_frame)
                 print(Fore.BLUE + 'Понял ', f'Секунд голоса: {VAW.shape[0] / 512 / 32}') #log
-                sf.write('for_llm.WAV', VAW.reshape(-1).astype(np.float32) / 32768.0, samplerate=self.SAMPLE_RATE)
-                # Чтение вафки и перевод в текст
-                VAW, _ = torch_load('for_llm.WAV')
+                # Audio-to-text
                 text = self.STT(VAW)
                 print(Fore.GREEN + f"USER: {text}") #log
                 # Запрос в llm
-                llm_resp = self.text_for_llm(text)
-                try:
-                    func_return = call_func_with_llm_resp(llm_resp, self.llm_name, self.llm_api_url)
-                    if func_return is not None:
-                        self.TTS(func_return)
-                except Exception as e:
-                    print(Fore.BLUE + f'AGENT ANSWER: {llm_resp}') #log
-                    print(e)
+                agent_resp = self.agent.run(text)
+                print(Fore.BLUE + f"AGENT: {agent_resp}") #log
                 torch.cuda.empty_cache()
